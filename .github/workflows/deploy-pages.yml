@@ -1,0 +1,36 @@
+# Deploys the orphan `pages-deploy` branch (PWA shell + d/<key>/*.json written by the box)
+# to GitHub Pages. Lives on `main`; `main` itself never contains desk data.
+# Triggered by scripts/deploy_pages.py via workflow_dispatch right after it force-pushes pages-deploy.
+# One-time: Settings -> Pages -> Build and deployment -> Source = "GitHub Actions"
+# (deploy_pages.py --configure-pages does this through the API if the token has admin rights).
+name: deploy-pages
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: pages-deploy
+          fetch-depth: 1
+      - name: Guard - no index under d/, no listing
+        run: |
+          find d -name index.html -print -delete 2>/dev/null || true
+          rm -rf .git
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - id: deployment
+        uses: actions/deploy-pages@v4
