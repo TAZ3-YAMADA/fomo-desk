@@ -1,10 +1,16 @@
 # Desk
 
-Static trading desk. GitHub Pages serves this repository from the `main` branch, folder `/` (root).
+Static trading desk for GitHub Pages, served from the `main` branch at `/` (root).
 
 https://taz3-yamada.github.io/fomo-desk/
 
-Settings → Pages → Deploy from a branch → `main` → `/ (root)`. `.nojekyll` is here so Pages serves `d/` as files, not a Jekyll site.
+Pages is not on until a repository admin saves it once:
+
+1. Open https://github.com/TAZ3-YAMADA/fomo-desk/settings/pages
+2. Build and deployment → Source: **Deploy from a branch**
+3. Branch: `main`, folder: `/ (root)`, then Save
+
+`.nojekyll` is in the root so Pages serves `d/` as files instead of running Jekyll. Turning Pages on needs `pages: write` or repository administration; a contents-only token cannot do it.
 
 ## Data
 
