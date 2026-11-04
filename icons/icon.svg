@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Desk">
+  <rect width="512" height="512" fill="#000"/>
+  <polyline points="146,332 206,286 256,304 318,214 366,176" fill="none" stroke="#fff" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="366" cy="176" r="16" fill="#fff"/>
+</svg>
