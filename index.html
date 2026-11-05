@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FOMO Desk">
+<meta name="referrer" content="no-referrer">
+<title>FOMO Desk</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <div class="title"><span id="h-title">Home</span><span class="badge paper" id="badge">PAPER</span></div>
+  <div class="sub" id="h-sub">Loading…</div>
+</header>
+
+<main id="view">
+  <section id="tab-home" class="tab active"></section>
+  <section id="tab-agents" class="tab"></section>
+  <section id="tab-activity" class="tab"></section>
+  <section id="tab-account" class="tab"></section>
+</main>
+
+<div id="sheet" class="sheet hidden" role="dialog" aria-modal="true">
+  <div class="sheet-card">
+    <div class="sheet-grab"></div>
+    <button class="sheet-close" id="sheet-close" aria-label="Close">Done</button>
+    <div id="sheet-body"></div>
+  </div>
+</div>
+
+<nav class="tabbar">
+  <button data-tab="home" class="on"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></svg><span>Home</span></button>
+  <button data-tab="agents"><svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="3"/><circle cx="16" cy="8" r="3"/><path d="M2 20c0-3 3-6 6-6s6 3 6 6M10 20c0-3 3-6 6-6s6 3 6 6"/></svg><span>Agents</span></button>
+  <button data-tab="activity"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span>Activity</span></button>
+  <button data-tab="account"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7"/></svg><span>Account</span></button>
+</nav>
+<script src="chart.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
