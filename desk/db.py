@@ -27,6 +27,9 @@ CONFIDENCE_VALUES = frozenset({"unknown", "low", "medium", "high"})
 SIGNAL_SOURCES = frozenset({"rpc", "replay"})
 SIGNAL_SIDES = frozenset({"buy", "sell"})
 NEGATIVE_CONTROL_LABELS = frozenset({"end837"})
+NEGATIVE_CONTROL_PUBKEYS = frozenset(
+    {"5DBkonys2H4qHr5x9CCeXPLSWEFbnnLFP1RdfxjJgzvy"}
+)
 
 _B58_ALPHABET = frozenset(
     "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
@@ -81,6 +84,11 @@ CREATE TABLE IF NOT EXISTS whitelist (
     added_at TEXT NOT NULL,
     added_by TEXT NOT NULL,
     provenance TEXT NOT NULL,
+    whitelist_entry_id TEXT,
+    wallet_pubkey TEXT,
+    consent_provenance TEXT,
+    live_whitelist_consented INTEGER NOT NULL DEFAULT 0,
+    paper_copy_allowed INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (wallet_label) REFERENCES labeled_wallets(wallet_label),
     CHECK (status IN ('observe', 'paper_copy', 'paused', 'blocked')),
     CHECK (tier IN ('A', 'B', 'C', 'blocked')),
@@ -90,12 +98,23 @@ CREATE TABLE IF NOT EXISTS whitelist (
     ),
     CHECK (length(trim(provenance)) > 0),
     CHECK (length(trim(added_by)) > 0),
-    CHECK (cap_usd IS NULL OR cap_usd >= 0)
+    CHECK (cap_usd IS NULL OR cap_usd >= 0),
+    CHECK (live_whitelist_consented = 0),
+    CHECK (paper_copy_allowed IN (0, 1)),
+    CHECK (
+        whitelist_entry_id IS NULL
+        OR length(whitelist_entry_id) BETWEEN 1 AND 128
+    )
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS whitelist_entry_id_uidx
+ON whitelist(whitelist_entry_id)
+WHERE whitelist_entry_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS whale_signals (
     event_id TEXT PRIMARY KEY,
     wallet_label TEXT NOT NULL,
+    user_id TEXT NOT NULL,
     side TEXT NOT NULL,
     token_mint TEXT NOT NULL,
     chain TEXT NOT NULL DEFAULT 'solana',
@@ -104,6 +123,7 @@ CREATE TABLE IF NOT EXISTS whale_signals (
     source TEXT NOT NULL,
     raw_json TEXT,
     CHECK (length(event_id) BETWEEN 1 AND 128),
+    CHECK (length(user_id) BETWEEN 32 AND 44),
     CHECK (side IN ('buy', 'sell')),
     CHECK (length(token_mint) BETWEEN 1 AND 64),
     CHECK (chain = 'solana'),
@@ -166,6 +186,88 @@ WHEN OLD.status = 'blocked'
 BEGIN
     SELECT RAISE(ABORT, 'blocked whitelist rows cannot be promoted');
 END;
+
+CREATE TRIGGER IF NOT EXISTS labeled_nc_pubkey_insert
+BEFORE INSERT ON labeled_wallets
+WHEN NEW.solana_address = '5DBkonys2H4qHr5x9CCeXPLSWEFbnnLFP1RdfxjJgzvy'
+ AND NEW.status != 'blocked'
+BEGIN
+    SELECT RAISE(ABORT, 'negative control pubkey must stay blocked');
+END;
+
+CREATE TRIGGER IF NOT EXISTS labeled_nc_pubkey_update
+BEFORE UPDATE ON labeled_wallets
+WHEN NEW.solana_address = '5DBkonys2H4qHr5x9CCeXPLSWEFbnnLFP1RdfxjJgzvy'
+ AND NEW.status != 'blocked'
+BEGIN
+    SELECT RAISE(ABORT, 'negative control pubkey must stay blocked');
+END;
+
+CREATE TRIGGER IF NOT EXISTS whitelist_nc_pubkey_insert
+BEFORE INSERT ON whitelist
+WHEN NEW.wallet_pubkey = '5DBkonys2H4qHr5x9CCeXPLSWEFbnnLFP1RdfxjJgzvy'
+ AND (
+    NEW.status != 'blocked'
+    OR NEW.tier != 'blocked'
+    OR NEW.paper_copy_allowed != 0
+ )
+BEGIN
+    SELECT RAISE(ABORT, 'negative control pubkey cannot be paper copied');
+END;
+
+CREATE TRIGGER IF NOT EXISTS whitelist_nc_pubkey_update
+BEFORE UPDATE ON whitelist
+WHEN NEW.wallet_pubkey = '5DBkonys2H4qHr5x9CCeXPLSWEFbnnLFP1RdfxjJgzvy'
+ AND (
+    NEW.status != 'blocked'
+    OR NEW.tier != 'blocked'
+    OR NEW.paper_copy_allowed != 0
+ )
+BEGIN
+    SELECT RAISE(ABORT, 'negative control pubkey cannot be paper copied');
+END;
+
+CREATE TRIGGER IF NOT EXISTS whitelist_third_party_no_paper_copy_insert
+BEFORE INSERT ON whitelist
+WHEN NEW.status = 'paper_copy'
+ AND instr(COALESCE(NEW.consent_provenance, ''), 'third-party-resolved') > 0
+BEGIN
+    SELECT RAISE(ABORT, 'PAPER_COPY_NOT_ALLOWED');
+END;
+
+CREATE TRIGGER IF NOT EXISTS whitelist_third_party_no_paper_copy_update
+BEFORE UPDATE ON whitelist
+WHEN instr(COALESCE(OLD.consent_provenance, ''), 'third-party-resolved') > 0
+ AND (
+    NEW.status = 'paper_copy'
+    OR NEW.paper_copy_allowed != 0
+    OR NEW.live_whitelist_consented != 0
+ )
+BEGIN
+    SELECT RAISE(ABORT, 'PAPER_COPY_NOT_ALLOWED');
+END;
+
+CREATE TRIGGER IF NOT EXISTS whale_signals_require_labeled_wallet
+BEFORE INSERT ON whale_signals
+WHEN NOT EXISTS (
+    SELECT 1 FROM labeled_wallets
+    WHERE wallet_label = NEW.wallet_label
+      AND solana_address = NEW.user_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'whale signal requires a labeled wallet_label and pubkey');
+END;
+
+CREATE TRIGGER IF NOT EXISTS whale_signals_require_labeled_wallet_update
+BEFORE UPDATE ON whale_signals
+WHEN NOT EXISTS (
+    SELECT 1 FROM labeled_wallets
+    WHERE wallet_label = NEW.wallet_label
+      AND solana_address = NEW.user_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'whale signal requires a labeled wallet_label and pubkey');
+END;
 """
 
 
@@ -184,6 +286,10 @@ def canonical_label(wallet_label: str) -> str:
 
 def is_negative_control(wallet_label: str) -> bool:
     return str(wallet_label).strip().casefold() in NEGATIVE_CONTROL_LABELS
+
+
+def is_negative_control_pubkey(value: Any) -> bool:
+    return str(value or "").strip() in NEGATIVE_CONTROL_PUBKEYS
 
 
 def normalize_solana(value: Any) -> str | None:
@@ -256,6 +362,8 @@ def upsert_labeled_wallet(
     if confidence not in CONFIDENCE_VALUES:
         raise ValueError("confidence must be unknown, low, medium, or high")
     solana = normalize_solana(solana_address)
+    if is_negative_control_pubkey(solana):
+        status = "blocked"
     note = None if display_note is None else str(display_note).strip() or None
     if note is not None and len(note) > 500:
         raise ValueError("display_note is too long")
@@ -303,12 +411,26 @@ def insert_whale_signal(
     size_usd: float | None = None,
     raw: dict[str, Any] | None = None,
     chain: str = "solana",
+    user_id: str | None = None,
 ) -> dict[str, Any]:
-    """Store one paper signal. This does not whitelist the wallet."""
+    """Store one paper signal for a wallet that is already labeled.
+
+    ``user_id`` is the public key. It must match ``labeled_wallets`` for
+    ``wallet_label``. This does not whitelist the wallet or allow paper copy.
+    """
     event = str(event_id).strip()
     if not event:
         raise ValueError("event_id is required")
     label = canonical_label(wallet_label)
+    wallet = get_labeled_wallet(conn, label)
+    if wallet is None or not wallet["solana_address"]:
+        raise ValueError("wallet_label is not a labeled wallet with a pubkey")
+    if user_id is None:
+        user_id = wallet["solana_address"]
+    else:
+        user_id = normalize_solana(user_id)
+        if user_id != wallet["solana_address"]:
+            raise ValueError("pubkey does not match the labeled wallet")
     if side not in SIGNAL_SIDES:
         raise ValueError("side must be buy or sell")
     mint = str(token_mint).strip()
@@ -330,11 +452,11 @@ def insert_whale_signal(
         conn.execute(
             """
             INSERT INTO whale_signals (
-                event_id, wallet_label, side, token_mint, chain,
+                event_id, wallet_label, user_id, side, token_mint, chain,
                 size_usd, ts, source, raw_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (event, label, side, mint, chain, size, ts, source, raw_json),
+            (event, label, user_id, side, mint, chain, size, ts, source, raw_json),
         )
         conn.commit()
     except Exception:

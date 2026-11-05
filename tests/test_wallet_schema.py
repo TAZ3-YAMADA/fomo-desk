@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 import unittest
@@ -126,6 +127,7 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(stored["source"], "replay")
         self.assertEqual(stored["chain"], "solana")
         self.assertEqual(stored["token_mint"], "mint-1")
+        self.assertEqual(stored["user_id"], OWNER_ADDRESS)
         after = conn.execute("SELECT count(*) AS n FROM whitelist").fetchone()["n"]
         self.assertEqual(before, after)
         with self.assertRaises(ValueError):
@@ -142,10 +144,55 @@ class SchemaTests(unittest.TestCase):
             conn.execute(
                 """
                 INSERT INTO whale_signals (
-                    event_id, wallet_label, side, token_mint, chain,
+                    event_id, wallet_label, user_id, side, token_mint, chain,
                     size_usd, ts, source, raw_json
-                ) VALUES ('sig-raw', 'alpha-desk', 'buy', 'mint-1', 'solana', NULL, 1, 'other', NULL)
+                ) VALUES ('sig-raw', 'alpha-desk', ?, 'buy', 'mint-1', 'solana', NULL, 1, 'other', NULL)
+                """,
+                (OWNER_ADDRESS,),
+            )
+        conn.close()
+
+    def test_signal_requires_labeled_wallet_and_pubkey(self) -> None:
+        conn = connect()
+        upsert_labeled_wallet(
+            conn,
+            wallet_label="alpha-desk",
+            solana_address=OWNER_ADDRESS,
+            provenance="owner pasted the address",
+        )
+        with self.assertRaises(ValueError):
+            insert_whale_signal(
+                conn,
+                event_id="sig-missing",
+                wallet_label="missing-wallet",
+                side="buy",
+                token_mint="mint-1",
+                ts=1_700_000_002,
+                source="replay",
+            )
+        with self.assertRaises(ValueError):
+            insert_whale_signal(
+                conn,
+                event_id="sig-mismatch",
+                wallet_label="alpha-desk",
+                side="buy",
+                token_mint="mint-1",
+                ts=1_700_000_003,
+                source="rpc",
+                user_id="FiXtureA1pha11111111111111111111111111111111",
+            )
+        with self.assertRaises(sqlite3.IntegrityError):
+            conn.execute(
                 """
+                INSERT INTO whale_signals (
+                    event_id, wallet_label, user_id, side, token_mint, chain,
+                    size_usd, ts, source, raw_json
+                ) VALUES (
+                    'sig-raw-missing', 'missing-wallet', ?, 'buy', 'mint-1',
+                    'solana', NULL, 1, 'replay', NULL
+                )
+                """,
+                (OWNER_ADDRESS,),
             )
         conn.close()
 
@@ -404,6 +451,122 @@ class BoundaryTests(unittest.TestCase):
         self.assertNotIn("private_key", lowered)
         self.assertNotIn("seed phrase", lowered)
         self.assertNotIn("sign_transaction", lowered)
+
+
+class TierAFixtureTests(unittest.TestCase):
+    def test_tier_a_observe_and_end837_blocked(self) -> None:
+        conn = connect()
+        path = FIXTURES / "paper-tier-a-fixtures-v1.1.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        imported = import_path(conn, path)
+        import_path(conn, path)
+        self.assertEqual(len(imported), 10)
+        self.assertEqual(
+            conn.execute("SELECT count(*) AS n FROM labeled_wallets").fetchone()["n"],
+            10,
+        )
+        self.assertEqual(
+            conn.execute("SELECT count(*) AS n FROM whitelist").fetchone()["n"],
+            10,
+        )
+        by_label = {row["wallet_label"]: row for row in imported}
+        self.assertEqual(
+            set(by_label),
+            {entry["wallet_label"] for entry in payload["tier_a_whitelist"]},
+        )
+        observe = []
+        for entry in payload["tier_a_whitelist"]:
+            row = by_label[entry["wallet_label"]]
+            self.assertEqual(row["wallet_pubkey"], entry["wallet_pubkey"])
+            self.assertEqual(row["solana_address"], entry["wallet_pubkey"])
+            self.assertEqual(row["display_note"], entry["wallet_label"])
+            self.assertEqual(row["provenance"], entry["consent_provenance"])
+            self.assertEqual(row["consent_provenance"], entry["consent_provenance"])
+            self.assertEqual(row["whitelist_entry_id"], entry["whitelist_entry_id"])
+            self.assertFalse(row["live_whitelist_consented"])
+            self.assertFalse(row["paper_copy_allowed"])
+            if entry["wallet_label"] == "end837" or entry["forced_blocked_nc"]:
+                self.assertEqual(row["status"], "blocked")
+                self.assertEqual(row["whitelist_status"], "blocked")
+                self.assertEqual(row["tier"], "blocked")
+                self.assertEqual(row["whitelist_entry_id"], "paper-a-01-end837")
+            else:
+                observe.append(row)
+                self.assertEqual(row["whitelist_status"], "observe")
+                self.assertEqual(row["tier"], "A")
+        self.assertEqual(len(observe), 9)
+        self.assertEqual(
+            conn.execute(
+                "SELECT count(*) AS n FROM whitelist WHERE status = 'paper_copy'"
+            ).fetchone()["n"],
+            0,
+        )
+        cap_math = [
+            item
+            for item in payload["riskcontext_fixtures"]
+            if item["ctx"].get("paper_copy_allowed") is True
+        ]
+        self.assertGreaterEqual(len(cap_math), 1)
+        stored = get_whitelist(conn, "g41t3r98")
+        assert stored is not None
+        self.assertEqual(stored["status"], "observe")
+        self.assertEqual(stored["paper_copy_allowed"], 0)
+        with self.assertRaises(WhitelistRefused):
+            add_whitelist(
+                conn,
+                wallet_label="end837",
+                status="paper_copy",
+                tier="A",
+                provenance="should fail",
+                added_by="owner",
+            )
+        with self.assertRaises(WhitelistRefused) as locked:
+            add_whitelist(
+                conn,
+                wallet_label="zelda89",
+                status="paper_copy",
+                tier="A",
+                provenance=payload["provenance_template"],
+                added_by="owner",
+            )
+        self.assertIn("PAPER_COPY_NOT_ALLOWED", str(locked.exception))
+        with self.assertRaises(sqlite3.IntegrityError):
+            conn.execute(
+                """
+                UPDATE whitelist
+                SET status = 'paper_copy', tier = 'A', paper_copy_allowed = 1
+                WHERE wallet_label = 'end837'
+                """
+            )
+        conn.rollback()
+        still = get_whitelist(conn, "end837")
+        assert still is not None
+        self.assertEqual(still["status"], "blocked")
+        self.assertEqual(still["tier"], "blocked")
+        self.assertEqual(still["paper_copy_allowed"], 0)
+        self.assertEqual(still["live_whitelist_consented"], 0)
+        conn.close()
+
+    def test_tier_a_refuses_missing_pubkey(self) -> None:
+        conn = connect()
+        with self.assertRaises(DossierImportError):
+            import_dossier(
+                conn,
+                {
+                    "tier_a_whitelist": [
+                        {
+                            "whitelist_entry_id": "paper-b-11-no-address",
+                            "wallet_label": "tier-b-example",
+                            "tier": "B",
+                            "consent_provenance": "third-party-resolved · FomoRadar 30d · 2026-11-04 19:09 UTC",
+                            "status": "observe",
+                        }
+                    ]
+                },
+            )
+        count = conn.execute("SELECT count(*) AS n FROM labeled_wallets").fetchone()["n"]
+        self.assertEqual(count, 0)
+        conn.close()
 
 
 if __name__ == "__main__":

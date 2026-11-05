@@ -36,6 +36,8 @@ Wallet watching is a SQLite registry beside the Pages book. This repo has no min
 
 The watch key is `wallet_label` together with the public Solana address. `provenance` is required and records how the owner provided that address. Dossier import stores that address with `provenance` set to `dossier_import`. When the file includes a handle, the string is copied into `display_note` only. A dossier with a handle and no `wallet_label` is refused, so a display name is never a watch key.
 
-`end837` is a negative control. Import stores it as whitelist `status=blocked` and `tier=blocked`. `add_whitelist` refuses that label and any wallet whose status is already `blocked`. `whale_signals.source` accepts `rpc` or `replay` only. This slice is schema, import, and tests: paper/sim only, with no trading, signing, or ingest.
+`end837` is a negative control. Import stores it as whitelist `status=blocked` and `tier=blocked`. `add_whitelist` refuses that label and any wallet whose status is already `blocked`. `whale_signals.source` accepts `rpc` or `replay` only, and a signal insert requires a labeled wallet whose pubkey matches `user_id`. This slice is schema, import, and tests: paper/sim only, with no trading, signing, or ingest.
+
+`tests/fixtures/paper-tier-a-fixtures-v1.1.json` is the Tier A paper shortlist. Import uses each row's `consent_provenance`. `forced_blocked_nc` (`end837`, `paper-a-01-end837`) stays `blocked` / `blocked`. The other nine import as `observe` with `paper_copy_allowed` false and `live_whitelist_consented` false. Cap-math overrides in that file are not applied.
 
 Run `python -m unittest discover -s tests`.
