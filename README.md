@@ -38,6 +38,6 @@ The watch key is `wallet_label` together with the public Solana address. `proven
 
 `end837` is a negative control. Import stores it as whitelist `status=blocked` and `tier=blocked`. `add_whitelist` refuses that label and any wallet whose status is already `blocked`. `whale_signals.source` accepts `rpc` or `replay` only, and a signal insert requires a labeled wallet whose pubkey matches `user_id`. This slice is schema, import, and tests: paper/sim only, with no trading, signing, or ingest.
 
-`tests/fixtures/paper-tier-a-fixtures-v1.1.json` is the Tier A paper shortlist. Import uses each row's `consent_provenance`. `forced_blocked_nc` (`end837`, `paper-a-01-end837`) stays `blocked` / `blocked`. The other nine import as `observe` with `paper_copy_allowed` false and `live_whitelist_consented` false. Cap-math overrides in that file are not applied.
+`tests/fixtures/paper-fixtures-v1.2-merged.json` is the paper shortlist, in `official_rank` order. Import stores `provenance_template` (official 30d plus the third-party resolve). `end837` (`paper-nc-end837`, `forced_blocked_nc`) stays `blocked` / `blocked`. The other nine import as `observe` with `paper_copy_allowed` false and `live_whitelist_consented` false. Quanterty, aiwass, SavageCountry, bystevenr, and xfilesboy have no address in that file and are not imported.
 
 Run `python -m unittest discover -s tests`.

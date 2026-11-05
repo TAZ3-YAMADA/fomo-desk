@@ -456,10 +456,44 @@ class BoundaryTests(unittest.TestCase):
 class TierAFixtureTests(unittest.TestCase):
     def test_tier_a_observe_and_end837_blocked(self) -> None:
         conn = connect()
-        path = FIXTURES / "paper-tier-a-fixtures-v1.1.json"
+        path = FIXTURES / "paper-fixtures-v1.2-merged.json"
         payload = json.loads(path.read_text(encoding="utf-8"))
+        template = payload["provenance_template"]
+        self.assertIn("official-FOMO-signed-in-30d", template)
+        self.assertIn("third-party-resolved", template)
         imported = import_path(conn, path)
         import_path(conn, path)
+        ranked = sorted(payload["tier_a_whitelist"], key=lambda entry: entry["official_rank"])
+        self.assertEqual(
+            [row["wallet_label"] for row in imported],
+            [entry["wallet_label"] for entry in ranked],
+        )
+        observe_labels = [
+            entry["wallet_label"] for entry in ranked if entry["status"] == "observe"
+        ]
+        self.assertEqual(
+            observe_labels,
+            [
+                "g41t3r98",
+                "0xbr9",
+                "cosby",
+                "zelda89",
+                "oura456",
+                "awtorkowski7",
+                "pressingprofits",
+                "vvvvvvvvvv",
+                "yuren477",
+            ],
+        )
+        self.assertEqual(
+            [entry["official_rank"] for entry in ranked if entry["status"] == "observe"],
+            [2, 3, 4, 5, 6, 7, 9, 12, 15],
+        )
+        gaps = ["Quanterty", "aiwass", "SavageCountry", "bystevenr", "xfilesboy"]
+        self.assertEqual(payload["gaps_no_solana_excluded"], gaps)
+        imported_labels = {row["wallet_label"].casefold() for row in imported}
+        for name in gaps:
+            self.assertNotIn(name.casefold(), imported_labels)
         self.assertEqual(len(imported), 10)
         self.assertEqual(
             conn.execute("SELECT count(*) AS n FROM labeled_wallets").fetchone()["n"],
@@ -470,18 +504,16 @@ class TierAFixtureTests(unittest.TestCase):
             10,
         )
         by_label = {row["wallet_label"]: row for row in imported}
-        self.assertEqual(
-            set(by_label),
-            {entry["wallet_label"] for entry in payload["tier_a_whitelist"]},
-        )
+        self.assertEqual(set(by_label), {entry["wallet_label"] for entry in ranked})
         observe = []
-        for entry in payload["tier_a_whitelist"]:
+        for entry in ranked:
             row = by_label[entry["wallet_label"]]
+            expected_note = entry.get("display_note") or entry["wallet_label"]
             self.assertEqual(row["wallet_pubkey"], entry["wallet_pubkey"])
             self.assertEqual(row["solana_address"], entry["wallet_pubkey"])
-            self.assertEqual(row["display_note"], entry["wallet_label"])
-            self.assertEqual(row["provenance"], entry["consent_provenance"])
-            self.assertEqual(row["consent_provenance"], entry["consent_provenance"])
+            self.assertEqual(row["display_note"], expected_note)
+            self.assertEqual(row["provenance"], template)
+            self.assertEqual(row["consent_provenance"], template)
             self.assertEqual(row["whitelist_entry_id"], entry["whitelist_entry_id"])
             self.assertFalse(row["live_whitelist_consented"])
             self.assertFalse(row["paper_copy_allowed"])
@@ -492,7 +524,7 @@ class TierAFixtureTests(unittest.TestCase):
                 self.assertEqual(row["status"], "blocked")
                 self.assertEqual(row["whitelist_status"], "blocked")
                 self.assertEqual(row["tier"], "blocked")
-                self.assertEqual(row["whitelist_entry_id"], "paper-a-01-end837")
+                self.assertEqual(row["whitelist_entry_id"], "paper-nc-end837")
             else:
                 observe.append(row)
                 self.assertEqual(entry["status"], "observe")
@@ -505,16 +537,11 @@ class TierAFixtureTests(unittest.TestCase):
             ).fetchone()["n"],
             0,
         )
-        cap_math = [
-            item
-            for item in payload["riskcontext_fixtures"]
-            if item["ctx"].get("paper_copy_allowed") is True
-        ]
-        self.assertGreaterEqual(len(cap_math), 1)
         stored = get_whitelist(conn, "g41t3r98")
         assert stored is not None
         self.assertEqual(stored["status"], "observe")
         self.assertEqual(stored["paper_copy_allowed"], 0)
+        self.assertEqual(get_labeled_wallet(conn, "g41t3r98")["display_note"], "G41T3R98")
         with self.assertRaises(WhitelistRefused):
             add_whitelist(
                 conn,

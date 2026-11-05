@@ -147,16 +147,23 @@ def _require_entry_text(entry: dict[str, Any], key: str) -> str:
     return value.strip()
 
 
-def _prepare_tier_a_entry(entry: Any) -> dict[str, Any]:
+def _prepare_tier_a_entry(entry: Any, provenance_template: str | None = None) -> dict[str, Any]:
     payload = _object(entry)
     label = _require_entry_text(payload, "wallet_label")
     entry_id = _require_entry_text(payload, "whitelist_entry_id")
-    provenance = payload.get("consent_provenance")
-    if not isinstance(provenance, str) or not provenance.strip():
-        provenance = payload.get("provenance")
-    if not isinstance(provenance, str) or not provenance.strip():
-        raise DossierImportError("consent_provenance is required")
-    provenance = provenance.strip()
+    if isinstance(provenance_template, str) and provenance_template.strip():
+        provenance = provenance_template.strip()
+    else:
+        provenance = payload.get("consent_provenance")
+        if not isinstance(provenance, str) or not provenance.strip():
+            provenance = payload.get("provenance")
+        if not isinstance(provenance, str) or not provenance.strip():
+            raise DossierImportError("consent_provenance is required")
+        provenance = provenance.strip()
+    note = payload.get("display_note")
+    display_note = note.strip() if isinstance(note, str) and note.strip() else label
+    rank = payload.get("official_rank")
+    official_rank = rank if isinstance(rank, int) and not isinstance(rank, bool) else 10**9
     raw_pubkey = payload.get("wallet_pubkey")
     if not isinstance(raw_pubkey, str) or not raw_pubkey.strip():
         raise DossierImportError(
@@ -177,7 +184,7 @@ def _prepare_tier_a_entry(entry: Any) -> dict[str, Any]:
         or is_negative_control(label)
         or payload.get("forced_blocked_nc") is True
         or is_negative_control_pubkey(pubkey)
-        or entry_id == "paper-a-01-end837"
+        or entry_id in {"paper-a-01-end837", "paper-nc-end837"}
     )
     if force:
         tier = "blocked"
@@ -185,10 +192,12 @@ def _prepare_tier_a_entry(entry: Any) -> dict[str, Any]:
         tier = "A"
     return {
         "wallet_label": label,
+        "display_note": display_note,
         "whitelist_entry_id": entry_id,
         "provenance": provenance,
         "pubkey": pubkey,
         "tier": tier,
+        "official_rank": official_rank,
         "force_blocked": force,
         "archive": json.dumps(payload, separators=(",", ":"), sort_keys=True),
     }
@@ -202,7 +211,7 @@ def _write_tier_a_entry(conn: sqlite3.Connection, prepared: dict[str, Any]) -> d
             wallet_label=prepared["wallet_label"],
             solana_address=prepared["pubkey"],
             provenance=prepared["provenance"],
-            display_note=prepared["wallet_label"],
+            display_note=prepared["display_note"],
             status="blocked" if prepared["force_blocked"] else "unreviewed",
             dossier_json=prepared["archive"],
         )
@@ -234,15 +243,20 @@ def _write_tier_a_entry(conn: sqlite3.Connection, prepared: dict[str, Any]) -> d
 def import_tier_a(conn: sqlite3.Connection, doc: Any) -> list[dict[str, Any]]:
     """Import ``tier_a_whitelist`` only.
 
-    ``end837`` and ``forced_blocked_nc`` are stored blocked. Every other row
-    is ``observe`` with paper copy and live consent left off. ``riskcontext_fixtures``
-    are not applied.
+    Rows are written in ``official_rank`` order. Provenance comes from
+    ``provenance_template`` when the file has one. Names listed only as
+    address gaps are not imported. ``end837`` and ``forced_blocked_nc`` are
+    stored blocked. Every other row is ``observe`` with paper copy and live
+    consent left off.
     """
     payload = _object(doc)
     entries = payload.get("tier_a_whitelist")
     if not isinstance(entries, list):
         raise DossierImportError("tier_a_whitelist must be a list")
-    prepared = [_prepare_tier_a_entry(entry) for entry in entries]
+    template = payload.get("provenance_template")
+    template_text = template.strip() if isinstance(template, str) else None
+    prepared = [_prepare_tier_a_entry(entry, template_text) for entry in entries]
+    prepared.sort(key=lambda item: item["official_rank"])
     return [_write_tier_a_entry(conn, item) for item in prepared]
 
 
