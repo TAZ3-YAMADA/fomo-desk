@@ -44,7 +44,7 @@
       "pnl_30d_usd": 459000,
       "source": "https://fomoradar.io/leaderboard/30d",
       "snapshot_at": "2026-11-04T19:09:00Z",
-      "status": "observe",
+      "status": "blocked",
       "paper_copy_allowed": false,
       "forced_blocked_nc": true,
       "nc_note": "Architect/Tom negative control \u2014 forced blocked in paper fixtures"

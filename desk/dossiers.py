@@ -171,8 +171,10 @@ def _prepare_tier_a_entry(entry: Any) -> dict[str, Any]:
             "wallet_pubkey is required; addresses are not resolved or invented"
         )
     tier = str(payload.get("tier") or "A").strip()
+    file_status = str(payload.get("status") or "").strip().casefold()
     force = (
-        is_negative_control(label)
+        file_status == "blocked"
+        or is_negative_control(label)
         or payload.get("forced_blocked_nc") is True
         or is_negative_control_pubkey(pubkey)
         or entry_id == "paper-a-01-end837"

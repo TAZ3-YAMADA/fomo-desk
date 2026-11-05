@@ -486,12 +486,16 @@ class TierAFixtureTests(unittest.TestCase):
             self.assertFalse(row["live_whitelist_consented"])
             self.assertFalse(row["paper_copy_allowed"])
             if entry["wallet_label"] == "end837" or entry["forced_blocked_nc"]:
+                self.assertEqual(entry["status"], "blocked")
+                self.assertEqual(entry["tier"], "blocked")
+                self.assertTrue(entry["forced_blocked_nc"])
                 self.assertEqual(row["status"], "blocked")
                 self.assertEqual(row["whitelist_status"], "blocked")
                 self.assertEqual(row["tier"], "blocked")
                 self.assertEqual(row["whitelist_entry_id"], "paper-a-01-end837")
             else:
                 observe.append(row)
+                self.assertEqual(entry["status"], "observe")
                 self.assertEqual(row["whitelist_status"], "observe")
                 self.assertEqual(row["tier"], "A")
         self.assertEqual(len(observe), 9)
